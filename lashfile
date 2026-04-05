@@ -1,0 +1,16 @@
+build:
+	go build .
+
+reset:
+	cp -f test.txt.bak test.txt
+	go build .
+	
+run:
+	go build .
+	./elsefix test.txt
+
+check:
+	cp -f text.txt.bak test.txt
+	go build .
+	./elsefix test.txt
+	
