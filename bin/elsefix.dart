@@ -3,40 +3,33 @@ import "argparse.dart";
 
 void main(List<String> args) {
   final p = Parser();
-  p.register("-", "Read from stdin (use in place of a file name)");
-  p.register("--stdin", "Read from stdin");
-  p.register("--include-catch", "Also fix catch blocks");
-  p.register("-c", "Also fix catch blocks");
-  p.register("--help", "Print this help menu.");
-  p.register("-h", "Print this help menu.");
-  p.register("--interactive", "Review changes one by one", type: bool);
-  p.register("-i", "Review changes one by one", type: bool);
-  p.register("%EXTRAS%", "");
+  registerFlags(p);
   try {
     p.parse(args);
-    final results = p.getParsed();
-    if (results.containsKey("--help") ||
-        results.containsKey("-h") ||
-        (results.isEmpty && args.isEmpty)) {
+    final parsed = p.getParsed();
+    if (parsed.containsKey("--help") ||
+        parsed.containsKey("-h") ||
+        (parsed.isEmpty && args.isEmpty)) {
       printUsage(p);
       return;
     }
-    final filename = getFilename(args, results);
+    final filename = getFilename(args, parsed);
     if (filename.isNotEmpty) {
-      final lines = File(filename).readAsLinesSync();
+      File file = File(filename);
+      final lines = file.readAsLinesSync();
       final spaceType = detectSpacingType(lines);
-      print(spaceType);
-      for (String line in lines) {
-        // TODO: Implement main logic
-        if (lineHasToken(line, "} else")) {
-          print(line);
-        }
-      }
-    } else {
+      bool includeCatch = parsed["-c"] ?? parsed["--include-catch"] ?? false;
+      RegExp elsePattern = RegExp(r'}\s*\belse\b');
+      RegExp catchPattern = RegExp(r'}\s*\bcatch\b');
+      String result = handleLines(lines, elsePattern, catchPattern, includeCatch, spaceType);
+      file.writeAsStringSync(result);
+    }
+    else {
       printUsage(p);
     }
-  } catch (e) {
-    print(e);
+  }
+  catch (e) {
+    print("Error: $e");
     p.printFlags();
   }
 }
@@ -83,27 +76,104 @@ String getFilename(List<String> args, Map<String, dynamic> parsed) {
   return "";
 }
 
-bool lineHasToken(String line, String tok) {
-  if (line.contains(tok)) {
-    if (!line.contains('"') && !line.contains("'")) {
-      return true;
-    } else {
-      int countS = line.allMatches("'").length;
-      int countD = line.allMatches('"').length;
-      String quoteTok = countS > countD ? "'" : '"';
-      int start = line.indexOf(quoteTok);
-      int end = line.lastIndexOf(quoteTok);
-      int target = line.indexOf(tok);
-      if (target > start && target < end) {
-        int check = line.lastIndexOf(tok);
-        if (check == target) return false;
-        while (check < end) {
-          check = line.indexOf(tok, ++target);
-          if (check == -1) return false;
-        }
-        return true;
-      }
+bool lineHasToken(String line, RegExp pattern) {
+  if (!pattern.hasMatch(line)) return false;
+  if (!line.contains('"') && !line.contains("'")) return true;
+  int countS = "'".allMatches(line).length;
+  int countD = '"'.allMatches(line).length;
+  String quoteTok = countS > countD ? "'" : '"';
+  int start = line.indexOf(quoteTok);
+  int end = line.lastIndexOf(quoteTok);
+  int target = pattern.firstMatch(line)!.start;
+  if (target > start && target < end) {
+    int check = pattern.allMatches(line).last.start;
+    if (check == target) return false;
+    while (check < end) {
+      final next = pattern.allMatches(line, ++target).firstOrNull;
+      if (next == null) return false;
+      check = next.start;
     }
+    return true;
   }
   return false;
 }
+
+void registerFlags(Parser p) {
+  p.register("-", "Read from stdin (use in place of a file name)");
+  p.register("--stdin", "Read from stdin");
+  p.register("--include-catch", "Also fix catch blocks");
+  p.register("-c", "Also fix catch blocks");
+  p.register("--help", "Print this help menu.");
+  p.register("-h", "Print this help menu.");
+  p.register("--interactive", "Review changes one by one", type: bool);
+  p.register("-i", "Review changes one by one", type: bool);
+  p.register("%EXTRAS%", "");
+}
+
+int getIndentLevel(String line, SpacingType s) {
+  int result = 0;
+  String target = "";
+  switch (s) {
+    case .spaces:
+      target = " ";
+    case .tabs:
+      target = "\t";
+  }
+  for (String c in line.split("")) {
+    if (c != target) break;
+    result++;
+  }
+  return result;
+}
+
+String fixLine(String line, SpacingType s, int indents) {
+  String result = "";
+  int brace = line.indexOf("}");
+  result += "${line.substring(0, brace + 1)}\n";
+  String pad = "";
+  for (int i = 0; i < indents; i++) {
+    switch (s) {
+      case .spaces:
+        pad += " ";
+      case .tabs:
+        pad += "\t";
+    }
+  }
+  String remaining = line.substring(brace + 1).trimLeft();
+  result += "$pad$remaining";
+  return result;
+}
+
+String handleLines(
+  List<String> lines,
+  RegExp elsePattern,
+  RegExp catchPattern,
+  bool includeCatch,
+  SpacingType spaceType,
+) {
+  String result = "";
+  String newLine = "";
+  for (int i = 0; i < lines.length; i++) {
+    String line = lines[i];
+    if (lineHasToken(line, elsePattern)) {
+      print("Found:\n${i+1}:    ${line.trimLeft()}");
+      int indentLevel = getIndentLevel(line, spaceType);
+      newLine = fixLine(line, spaceType, indentLevel);
+      print("Changing to:\n${i+1}:    ${newLine.split("\n")[0].trimLeft()}\n${i+2}:    ${newLine.split("\n")[1].trimLeft()}\n");
+    }
+    if (includeCatch) {
+      if (lineHasToken(line, catchPattern)) {
+        print("Found:\n${i+1}:    ${line.trimLeft()}");
+        int indentLevel = getIndentLevel(line, spaceType);
+        newLine = fixLine(line, spaceType, indentLevel);
+        print("Changing to:\n${i+1}:    ${newLine.split("\n")[0].trimLeft()}\n${i+2}:    ${newLine.split("\n")[1].trimLeft()}\n");
+      }
+    }
+    if (newLine.isEmpty) newLine = line;
+    result += "$newLine\n";
+    newLine = "";
+  }
+  return result;
+}
+
+
