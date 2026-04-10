@@ -201,10 +201,10 @@ void printUsage(Parser p) {
 }
 
 void registerFlags(Parser p) {
-  p.register("-", "Read from stdin (use in place of a file name).");
   p.register("--stdin", "Read from stdin (use in place of a file name).");
-  p.register("-s", "Print results to stdout.");
+  p.register("-", "Read from stdin (use in place of a file name).");
   p.register("--stdout", "Print results to stdout.");
+  p.register("-s", "Print results to stdout.");
   p.register("--include-catch", "Also fix catch blocks.");
   p.register("-c", "Also fix catch blocks.");
   p.register("--help", "Print this help menu.");
