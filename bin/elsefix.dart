@@ -7,51 +7,7 @@ void main(List<String> args) async {
   final p = Parser();
   registerFlags(p);
   try {
-    p.parse(args);
-    final parsed = p.getParsed();
-    if (parsed.containsKey("--help") ||
-        parsed.containsKey("-h") ||
-        (parsed.isEmpty && args.isEmpty)) {
-      printUsage(p);
-      return;
-    }
-    bool useStdin = parsed.containsKey("-") || parsed.containsKey("--stdin");
-    String filename = getFilename(args, parsed);
-    late List<String> lines;
-    late File file;
-    if (useStdin) {
-      String text = await stdin.transform(utf8.decoder).join("\n");
-      lines = text.split("\n");
-    }
-    else if (filename.isNotEmpty) {
-      file = File(filename);
-      lines = file.readAsLinesSync();
-    }
-    else {
-      printUsage(p);
-    }
-    final spaceType = detectSpacingType(lines);
-    bool includeCatch = parsed["-c"] ?? parsed["--include-catch"] ?? false;
-    RegExp elsePattern = RegExp(r'}\s*\belse\b');
-    RegExp? catchPattern;
-    if (includeCatch) {
-      catchPattern = RegExp(r'}\s*\bcatch\b');
-    }
-    bool stdout = parsed["-s"] ?? parsed["--stdout"] ?? false;
-    String result = handleLines(
-      lines,
-      elsePattern,
-      catchPattern,
-      includeCatch,
-      stdout||useStdin,
-      spaceType,
-    );
-    if (stdout || useStdin) {
-      print(result);
-    }
-    else {
-      file.writeAsStringSync(result);
-    }
+    runMain(args, p);
   }
   catch (e) {
     print("Error: $e");
@@ -99,7 +55,6 @@ String getFilename(List<String> args, Map<String, dynamic> parsed) {
   if (possible.length == 1) return possible[0];
   return "";
 }
-
 int getIndentLevel(String line, SpacingType s) {
   int result = 0;
   String target = "";
@@ -115,48 +70,66 @@ int getIndentLevel(String line, SpacingType s) {
   }
   return result;
 }
-
-String handleLines(
+String handleLine(String line, int i, bool toStdout, SpacingType spaceType) {
+  String result = "";
+  if (!toStdout) {
+    print("Found:\n${i + 1}:    ${line.trimLeft()}");
+  }
+  int indentLevel = getIndentLevel(line, spaceType);
+  result = fixLine(line, spaceType, indentLevel);
+  if (!toStdout) {
+    print(
+      "Changing to:\n${i + 1}:    ${result.split("\n")[0].trimLeft()}\n${i + 2}:    ${result.split("\n")[1].trimLeft()}\n",
+    );
+  }
+  return result;
+}
+Future<String> handleLines(
   List<String> lines,
   RegExp elsePattern,
   RegExp? catchPattern,
   bool includeCatch,
-  bool stdout,
+  bool toStdout,
   SpacingType spaceType,
-) {
+  bool interactive,
+) async {
   String result = "";
-  String newLine = "";
+  bool acceptAll = false;
   for (int i = 0; i < lines.length; i++) {
     String line = lines[i];
-    if (lineHasToken(line, elsePattern)) {
-      if (!stdout) {
-        print("Found:\n${i + 1}:    ${line.trimLeft()}");
-      }
-      int indentLevel = getIndentLevel(line, spaceType);
-      newLine = fixLine(line, spaceType, indentLevel);
-      if (!stdout) {
-        print(
-          "Changing to:\n${i + 1}:    ${newLine.split("\n")[0].trimLeft()}\n${i + 2}:    ${newLine.split("\n")[1].trimLeft()}\n",
-        );
-      }
-    }
-    if (includeCatch) {
-      if (lineHasToken(line, catchPattern!)) {
-        if (!stdout) {
-          print("Found:\n${i + 1}:    ${line.trimLeft()}");
-        }
+    String newLine = "";
+    bool matched =
+        lineHasToken(line, elsePattern) ||
+        (includeCatch && lineHasToken(line, catchPattern!));
+    if (matched) {
+      if (interactive && !acceptAll) {
         int indentLevel = getIndentLevel(line, spaceType);
-        newLine = fixLine(line, spaceType, indentLevel);
-        if (!stdout) {
-          print(
-            "Changing to:\n${i + 1}:    ${newLine.split("\n")[0].trimLeft()}\n${i + 2}:    ${newLine.split("\n")[1].trimLeft()}\n",
-          );
+        String fixed = fixLine(line, spaceType, indentLevel);
+        showInteractiveDiff(lines, i, fixed);
+        stderr.write("[y]es / [n]o / [A]ccept all / [q]uit: ");
+        String response = promptUser();
+        stderr.writeln("");
+        switch (response) {
+          case 'q':
+            result += "$line\n";
+            for (int j = i + 1; j < lines.length; j++) {
+              result += "${lines[j]}\n";
+            }
+            return result;
+          case 'A':
+            acceptAll = true;
+            newLine = fixed;
+          case 'y':
+            newLine = fixed;
+          // default ('n' or anything else): leave newLine empty to keep original
         }
+      }
+      else {
+        newLine = handleLine(line, i, toStdout, spaceType);
       }
     }
     if (newLine.isEmpty) newLine = line;
     result += "$newLine\n";
-    newLine = "";
   }
   return result;
 }
@@ -200,6 +173,15 @@ void printUsage(Parser p) {
   }
 }
 
+String promptUser() {
+  stdin.echoMode = false;
+  stdin.lineMode = false;
+  int byte = stdin.readByteSync();
+  stdin.echoMode = true;
+  stdin.lineMode = true;
+  return String.fromCharCode(byte);
+}
+
 void registerFlags(Parser p) {
   p.register("--stdin", "Read from stdin (use in place of a file name).");
   p.register("-", "Read from stdin (use in place of a file name).");
@@ -214,5 +196,82 @@ void registerFlags(Parser p) {
   p.register("%EXTRAS%", "");
 }
 
-enum SpacingType { spaces, tabs }
+void runMain(List<String> args, Parser p) async {
+  p.parse(args);
+  final parsed = p.getParsed();
+  if (parsed.containsKey("--help") ||
+      parsed.containsKey("-h") ||
+      (parsed.isEmpty && args.isEmpty)) {
+    printUsage(p);
+    return;
+  }
+  bool useStdin = parsed.containsKey("-") || parsed.containsKey("--stdin");
+  bool interactive = parsed["-i"] ?? parsed["--interactive"] ?? false;
+  if (interactive && useStdin) {
+    print("Error: --interactive cannot be used with --stdin.");
+    return;
+  }
+  String filename = getFilename(args, parsed);
+  late List<String> lines;
+  late File file;
+  if (useStdin) {
+    String text = await stdin.transform(utf8.decoder).join("\n");
+    lines = text.split("\n");
+  }
+  else if (filename.isNotEmpty) {
+    file = File(filename);
+    lines = file.readAsLinesSync();
+  }
+  else {
+    printUsage(p);
+  }
+  final spaceType = detectSpacingType(lines);
+  bool includeCatch = parsed["-c"] ?? parsed["--include-catch"] ?? false;
+  RegExp elsePattern = RegExp(r'}\s*\belse\b');
+  RegExp? catchPattern;
+  if (includeCatch) {
+    catchPattern = RegExp(r'}\s*\bcatch\b');
+  }
+  bool toStdout = parsed["-s"] ?? parsed["--stdout"] ?? false;
+  String result = await handleLines(
+    lines,
+    elsePattern,
+    catchPattern,
+    includeCatch,
+    toStdout || useStdin,
+    spaceType,
+    interactive,
+  );
+  if (toStdout || useStdin) {
+    print(result);
+  }
+  else {
+    file.writeAsStringSync(result);
+  }
+}
 
+const String _dim = '\x1B[2m';
+const String _green = '\x1B[32m';
+const String _red = '\x1B[31m';
+const String _reset = '\x1B[0m';
+
+void showInteractiveDiff(List<String> lines, int i, String fixed) {
+  const int ctx = 2;
+  final List<String> fixedLines = fixed.split("\n");
+  final int numWidth = lines.length.toString().length;
+  String pad(int n) => (n + 1).toString().padLeft(numWidth);
+  int start = (i - ctx).clamp(0, lines.length);
+  for (int j = start; j < i; j++) {
+    print("$_dim  ${pad(j)} | ${lines[j]}$_reset");
+  }
+  print("$_red- ${pad(i)} | ${lines[i]}$_reset");
+  print("$_green+ ${pad(i)} | ${fixedLines[0]}$_reset");
+  print("$_green+ ${pad(i + 1)} | ${fixedLines[1]}$_reset");
+  int end = (i + ctx + 1).clamp(0, lines.length);
+  for (int j = i + 1; j < end; j++) {
+    print("$_dim  ${pad(j)} | ${lines[j]}$_reset");
+  }
+  print("");
+}
+
+enum SpacingType { spaces, tabs }
