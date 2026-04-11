@@ -55,6 +55,7 @@ String getFilename(List<String> args, Map<String, dynamic> parsed) {
   if (possible.length == 1) return possible[0];
   return "";
 }
+
 int getIndentLevel(String line, SpacingType s) {
   int result = 0;
   String target = "";
@@ -70,8 +71,16 @@ int getIndentLevel(String line, SpacingType s) {
   }
   return result;
 }
-String handleLine(String line, int i, bool toStdout, SpacingType spaceType) {
-  String result = "";
+
+String handleLine(
+  String line,
+  int i,
+  Map<String, dynamic> args,
+  SpacingType spaceType,
+) {
+  bool toStdout =
+      args["--stdout"] ?? args["-s"] ?? args["-"] ?? args["--stdin"] ?? false;
+  String result = line;
   if (!toStdout) {
     print("Found:\n${i + 1}:    ${line.trimLeft()}");
   }
@@ -82,14 +91,16 @@ String handleLine(String line, int i, bool toStdout, SpacingType spaceType) {
       "Changing to:\n${i + 1}:    ${result.split("\n")[0].trimLeft()}\n${i + 2}:    ${result.split("\n")[1].trimLeft()}\n",
     );
   }
-  return result;
+  bool dryRun = args["--dry-run"] ?? args["-d"] ?? false;
+  return dryRun ? line : result;
 }
+
 Future<String> handleLines(
   List<String> lines,
   RegExp elsePattern,
   RegExp? catchPattern,
   bool includeCatch,
-  bool toStdout,
+  Map<String, dynamic> parsed,
   SpacingType spaceType,
   bool interactive,
 ) async {
@@ -125,7 +136,7 @@ Future<String> handleLines(
         }
       }
       else {
-        newLine = handleLine(line, i, toStdout, spaceType);
+        newLine = handleLine(line, i, parsed, spaceType);
       }
     }
     if (newLine.isEmpty) newLine = line;
@@ -187,6 +198,14 @@ void registerFlags(Parser p) {
   p.register("-", "Read from stdin (use in place of a file name).");
   p.register("--stdout", "Print results to stdout.");
   p.register("-s", "Print results to stdout.");
+  p.register(
+    "--dry-run",
+    "Shows the output of the command without applying the changes..",
+  );
+  p.register(
+    "-d",
+    "Shows the output of the command without applying the changes..",
+  );
   p.register("--include-catch", "Also fix catch blocks.");
   p.register("-c", "Also fix catch blocks.");
   p.register("--help", "Print this help menu.");
@@ -238,7 +257,7 @@ void runMain(List<String> args, Parser p) async {
     elsePattern,
     catchPattern,
     includeCatch,
-    toStdout || useStdin,
+    parsed,
     spaceType,
     interactive,
   );
