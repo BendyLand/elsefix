@@ -8,8 +8,7 @@ void main(List<String> args) async {
   registerFlags(p);
   try {
     runMain(args, p);
-  }
-  catch (e) {
+  } catch (e) {
     print("Error: $e");
     p.printFlags();
   }
@@ -82,13 +81,14 @@ String handleLine(
       args["--stdout"] ?? args["-s"] ?? args["-"] ?? args["--stdin"] ?? false;
   String result = line;
   if (!toStdout) {
-    print("Found:\n${i + 1}:    ${line.trimLeft()}");
+    print("Found:\n$_red- ${i + 1} | ${line.trimLeft()}$_reset");
   }
   int indentLevel = getIndentLevel(line, spaceType);
   result = fixLine(line, spaceType, indentLevel);
   if (!toStdout) {
+    final parts = result.split("\n");
     print(
-      "Changing to:\n${i + 1}:    ${result.split("\n")[0].trimLeft()}\n${i + 2}:    ${result.split("\n")[1].trimLeft()}\n",
+      "Changing to:\n$_green+ ${i + 1} | ${parts[0].trimLeft()}$_reset\n$_green+ ${i + 2} | ${parts[1].trimLeft()}$_reset\n",
     );
   }
   bool dryRun = args["--dry-run"] ?? args["-d"] ?? false;
@@ -134,8 +134,7 @@ Future<String> handleLines(
             newLine = fixed;
           // default ('n' or anything else): leave newLine empty to keep original
         }
-      }
-      else {
+      } else {
         newLine = handleLine(line, i, parsed, spaceType);
       }
     }
@@ -236,12 +235,10 @@ void runMain(List<String> args, Parser p) async {
   if (useStdin) {
     String text = await stdin.transform(utf8.decoder).join("\n");
     lines = text.split("\n");
-  }
-  else if (filename.isNotEmpty) {
+  } else if (filename.isNotEmpty) {
     file = File(filename);
     lines = file.readAsLinesSync();
-  }
-  else {
+  } else {
     printUsage(p);
   }
   final spaceType = detectSpacingType(lines);
@@ -263,8 +260,7 @@ void runMain(List<String> args, Parser p) async {
   );
   if (toStdout || useStdin) {
     print(result);
-  }
-  else {
+  } else {
     file.writeAsStringSync(result);
   }
 }
