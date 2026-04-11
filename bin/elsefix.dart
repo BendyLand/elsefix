@@ -82,13 +82,14 @@ String handleLine(
       args["--stdout"] ?? args["-s"] ?? args["-"] ?? args["--stdin"] ?? false;
   String result = line;
   if (!toStdout) {
-    print("Found:\n${i + 1}:    ${line.trimLeft()}");
+    print("Found:\n$_red- ${i + 1} | ${line.trimLeft()}$_reset");
   }
   int indentLevel = getIndentLevel(line, spaceType);
   result = fixLine(line, spaceType, indentLevel);
   if (!toStdout) {
+    final parts = result.split("\n");
     print(
-      "Changing to:\n${i + 1}:    ${result.split("\n")[0].trimLeft()}\n${i + 2}:    ${result.split("\n")[1].trimLeft()}\n",
+      "Changing to:\n$_green+ ${i + 1} | ${parts[0].trimLeft()}$_reset\n$_green+ ${i + 2} | ${parts[1].trimLeft()}$_reset\n",
     );
   }
   bool dryRun = args["--dry-run"] ?? args["-d"] ?? false;
@@ -200,11 +201,11 @@ void registerFlags(Parser p) {
   p.register("-s", "Print results to stdout.");
   p.register(
     "--dry-run",
-    "Shows the output of the command without applying the changes..",
+    "Shows the output of the command without applying the changes.",
   );
   p.register(
     "-d",
-    "Shows the output of the command without applying the changes..",
+    "Shows the output of the command without applying the changes.",
   );
   p.register("--include-catch", "Also fix catch blocks.");
   p.register("-c", "Also fix catch blocks.");
