@@ -107,6 +107,13 @@ Future<String> handleLines(
 ) async {
   String result = "";
   bool acceptAll = false;
+  bool toStdout =
+      parsed["--stdout"] ??
+      parsed["-s"] ??
+      parsed["-"] ??
+      parsed["--stdin"] ??
+      false;
+  bool dryRun = parsed["--dry-run"] ?? parsed["-d"] ?? false;
   for (int i = 0; i < lines.length; i++) {
     String line = lines[i];
     String newLine = "";
@@ -141,8 +148,114 @@ Future<String> handleLines(
       }
     }
     if (newLine.isEmpty) newLine = line;
-    result += "$newLine\n";
+    // process mid-line else splits on each resulting sub-line
+    final List<String> subLines = newLine.split("\n");
+    final List<String> finalLines = [];
+    bool quit = false;
+    for (final String subLine in subLines) {
+      String current = subLine;
+      while (!quit) {
+        int indent = getIndentLevel(current, spaceType);
+        int? pos = midLineElsePos(current, indent);
+        if (pos == null) break;
+        String pad = "";
+        for (int k = 0; k < indent; k++) {
+          pad += spaceType == SpacingType.spaces ? " " : "\t";
+        }
+        String before = current.substring(0, pos).trimRight();
+        String after = "$pad${current.substring(pos)}";
+        String fixed = "$before\n$after";
+        if (interactive && !acceptAll) {
+          showInteractiveDiff([current], 0, fixed);
+          stderr.write("[y]es / [n]o / [A]ccept all / [q]uit: ");
+          String response = promptUser();
+          stderr.writeln("");
+          if (response == 'A') {
+            acceptAll = true;
+            finalLines.add(before);
+            current = after;
+          }
+          else if (response == 'y') {
+            finalLines.add(before);
+            current = after;
+          }
+          else if (response == 'q') {
+            quit = true;
+          }
+          else {
+            break; // 'n': keep current, stop splitting this sub-line
+          }
+        }
+        else {
+          if (!toStdout) {
+            print("Found:\n$_red- ${i + 1} | ${current.trimLeft()}$_reset");
+            print(
+              "Changing to:\n$_green+ ${i + 1} | ${before.trimLeft()}$_reset\n$_green+ ${i + 2} | ${after.trimLeft()}$_reset\n",
+            );
+          }
+          if (dryRun) break;
+          finalLines.add(before);
+          current = after;
+        }
+      }
+      finalLines.add(current);
+    }
+    result += "${finalLines.join("\n")}\n";
+    if (quit) {
+      for (int j = i + 1; j < lines.length; j++) {
+        result += "${lines[j]}\n";
+      }
+      return result;
+    }
   }
+  return result;
+}
+
+int? midLineElsePos(String line, int indentLevel) {
+  final pattern = RegExp(r'\belse\b');
+  for (final match in pattern.allMatches(line)) {
+    if (match.start <= indentLevel) continue;
+    if (line.substring(indentLevel, match.start).trim().isEmpty) continue;
+    bool inString = false;
+    bool inComment = false;
+    String? quoteChar;
+    for (int i = 0; i < match.start; i++) {
+      final c = line[i];
+      if (!inString && c == '/' && i + 1 < line.length && line[i + 1] == '/') {
+        inComment = true;
+        break;
+      }
+      if (!inString && (c == '"' || c == "'")) {
+        inString = true;
+        quoteChar = c;
+      }
+      else if (inString &&
+          c == quoteChar &&
+          (i == 0 || line[i - 1] != '\\')) {
+        inString = false;
+        quoteChar = null;
+      }
+    }
+    if (!inString && !inComment) return match.start;
+  }
+  return null;
+}
+
+List<String> splitMidLineElses(String line, SpacingType spaceType) {
+  final List<String> result = [];
+  String current = line;
+  while (true) {
+    int indent = getIndentLevel(current, spaceType);
+    int? pos = midLineElsePos(current, indent);
+    if (pos == null) break;
+    String pad = "";
+    for (int i = 0; i < indent; i++) {
+      pad += spaceType == SpacingType.spaces ? " " : "\t";
+    }
+    result.add(current.substring(0, pos).trimRight());
+    current = "$pad${current.substring(pos)}";
+  }
+  result.add(current);
   return result;
 }
 
@@ -165,7 +278,7 @@ bool lineHasToken(String line, RegExp pattern) {
     }
     return true;
   }
-  return false;
+  return true;
 }
 
 void printUsage(Parser p) {
@@ -247,10 +360,10 @@ void runMain(List<String> args, Parser p) async {
   }
   final spaceType = detectSpacingType(lines);
   bool includeCatch = parsed["-c"] ?? parsed["--include-catch"] ?? false;
-  RegExp elsePattern = RegExp(r'}\s*\belse\b');
+  RegExp elsePattern = RegExp(r'}\s*[^\r\n]+\belse\b');
   RegExp? catchPattern;
   if (includeCatch) {
-    catchPattern = RegExp(r'}\s*\bcatch\b');
+    catchPattern = RegExp(r'}\s*[^\r\n]+\bcatch\b');
   }
   bool toStdout = parsed["-s"] ?? parsed["--stdout"] ?? false;
   String result = await handleLines(
@@ -295,3 +408,4 @@ void showInteractiveDiff(List<String> lines, int i, String fixed) {
 }
 
 enum SpacingType { spaces, tabs }
+
