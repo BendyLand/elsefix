@@ -208,7 +208,7 @@ Future<String> handleLines(
       return result;
     }
   }
-  return result;
+  return result.trimRight();
 }
 
 int? midLineElsePos(String line, int indentLevel) {
