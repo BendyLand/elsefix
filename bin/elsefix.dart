@@ -212,7 +212,7 @@ Future<String> handleLines(
 }
 
 int? midLineElsePos(String line, int indentLevel) {
-  final pattern = RegExp(r'\belse\b');
+  final pattern = RegExp(r'[^#]\belse\b');
   for (final match in pattern.allMatches(line)) {
     if (match.start <= indentLevel) continue;
     if (line.substring(indentLevel, match.start).trim().isEmpty) continue;
@@ -357,6 +357,7 @@ void runMain(List<String> args, Parser p) async {
   }
   else {
     printUsage(p);
+    return;
   }
   final spaceType = detectSpacingType(lines);
   bool includeCatch = parsed["-c"] ?? parsed["--include-catch"] ?? false;
